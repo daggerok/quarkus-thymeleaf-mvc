@@ -1,0 +1,140 @@
+notifications:
+  email: false
+git:
+  quiet: true
+  depth: false
+language: java
+jdk: openjdk11
+node_js: lts/*
+python: 3.7
+matrix:
+  include:
+    - python: 3.7
+services:
+  - xvfb
+  - docker
+addons:
+  apt:
+    update: false
+    packages:
+      - jq
+      - bash
+      - curl
+      - tree
+      - docker-ce
+      - libxml2-utils
+      - libappindicator1
+      - fonts-liberation
+      - google-chrome-stable
+      - python3-setuptools
+      - python3-pip
+install: true
+before_install:
+  - export CHROME_BIN=/usr/bin/google-chrome
+  - export DISPLAY=:99.0
+  #
+  - if [ ! -f ${HOME}/.local/daggerok/bash-functions/master/main.bash ] ; then
+      mkdir -p ${HOME}/.local/daggerok/bash-functions/master ;
+      curl -s https://raw.githubusercontent.com/daggerok/bash-functions/master/main.bash > ${HOME}/.local/daggerok/bash-functions/master/main.bash ;
+    fi
+  - source ${HOME}/.local/daggerok/bash-functions/master/main.bash
+  - stop_any 80 5432 8080 6551
+  #
+  - export PATH=$HOME/.local/bin:$PATH
+  - pip3 install --user --upgrade pip
+  - pip install --user --upgrade httpie docker-compose
+env:
+  global:
+    - TERM=dumb
+jobs:
+  include:
+    - stage: test
+      jdk: openjdk11
+      name: test
+      script: cd $TRAVIS_BUILD_DIR && ./mvnw
+    - stage: test
+      jdk: openjdk11
+      name: integration test
+      script:
+        - cd $TRAVIS_BUILD_DIR
+        - ./mvnw
+        - java -jar target/*-runner.jar &
+        - wait_for 8080
+        - http :8080
+        - http :8080/max
+        - http :8080?name=bax
+        - http :8080/\
+        - http :8080?name=''
+        - stop_any 8080
+    - stage: test
+      jdk: openjdk8
+      name: docker integration test
+      script:
+        - cd $TRAVIS_BUILD_DIR
+        - ./mvnw package
+        - docker build -f src/main/docker/Dockerfile.jvm -t quarkus/quarkus-resteasy-html-thymeleaf-jvm .
+        - docker run --name app --rm -i -p 8080:8080 quarkus/quarkus-resteasy-html-thymeleaf-jvm &
+        - wait_healthy_docker_containers 1
+        - http :8080
+        - http :8080/max
+        - http :8080?name=bax
+        - http :8080/\
+        - http :8080?name=''
+        - docker rm -f -v app
+    - stage: test
+      jdk: openjdk11
+      name: uberJar integration test
+      script:
+        - cd $TRAVIS_BUILD_DIR
+        - ./mvnw package -PuberJar
+        - java -jar target/*-runner.jar &
+        - wait_for 8080
+        - http :8080
+        - http :8080/max
+        - http :8080?name=bax
+        - http :8080/\
+        - http :8080?name=''
+        - stop_any 8080
+#    - stage: test
+#      name: kubectl integration test on k3d k3s k8s
+#      jdk: openjdk11
+#      script:
+#        - cd $TRAVIS_BUILD_DIR
+#        #- wget -q -O - https://raw.githubusercontent.com/rancher/k3d/master/install.sh | bash
+#        - curl -s https://raw.githubusercontent.com/rancher/k3d/master/install.sh | bash
+#        - k3d create --api-port 6551 --publish 80:80
+#        - sleep 30s
+#        - export KUBECONFIG="$(k3d get-kubeconfig --name='k3s-default')"
+#        #
+#        - curl -LO https://storage.googleapis.com/kubernetes-release/release/`curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt`/bin/linux/amd64/kubectl
+#        - chmod +x ./kubectl
+#        #- mkdir -p ~/.local/bin/
+#        - mv -f ./kubectl ~/.local/bin/
+#        - kubectl cluster-info
+#        - kubectl get pods --all-namespaces
+#        #
+#        - kubectl get pods -w &
+#        - kubectl apply -f k8s/
+#        - kubectl get all
+#        - sleep 30s
+#        - kubectl get all
+#        - sleep 30s
+#        - kubectl get all -o wide
+#        - kubectl logs deployment/voting-depl
+#        - http :/flow --stream
+#        - http :/ --stream
+#        - http :/pub-sub
+#        - http :/api/pub-sub --stream &
+#        - for i in 1 2 3 4 5 6 7 8 ; do http :/api/pub-sub body="`date`" 'accept:text/event-stream' ; done
+#        #
+#        - kubectl delete -f k8s/
+#        #- k3d stop
+#        - k3d delete
+cache:
+  pip: true
+  packages: true
+  directories:
+    - ~/.local/daggerok
+    - ~/.config
+    - ~/.docker
+    - ~/.m2
